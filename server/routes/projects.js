@@ -1,23 +1,34 @@
 import express from 'express';
 import Project from '../models/Project.js';
-import Judge from '../models/Judge.js';
+import User from '../models/User.js';
+import { requireAnyAuth, requireAdmin, requireParticipant, requireJudge } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Get all projects with assigned judges
-router.get('/', async (req, res) => {
+// Get all projects with assigned judges (any authenticated user)
+router.get('/', requireAnyAuth, async (req, res) => {
   try {
-    const projects = await Project.find().populate('assignedJudges').sort({ createdAt: -1 });
+    const { hackathonId } = req.query;
+    const query = hackathonId ? { hackathonId } : {};
+    
+    const projects = await Project.find(query)
+      .populate('assignedJudges', 'firstName lastName email specialty initials')
+      .populate('createdBy', 'firstName lastName email')
+      .populate('hackathonId', 'name')
+      .sort({ createdAt: -1 });
     res.json(projects);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 });
 
-// Get a single project
-router.get('/:id', async (req, res) => {
+// Get a single project (any authenticated user)
+router.get('/:id', requireAnyAuth, async (req, res) => {
   try {
-    const project = await Project.findById(req.params.id).populate('assignedJudges');
+    const project = await Project.findById(req.params.id)
+      .populate('assignedJudges', 'firstName lastName email specialty initials')
+      .populate('createdBy', 'firstName lastName email')
+      .populate('hackathonId', 'name');
     if (!project) {
       return res.status(404).json({ message: 'Project not found' });
     }
@@ -27,48 +38,97 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// Create a new project
-router.post('/', async (req, res) => {
+// Create a new project (participant or admin)
+router.post('/', requireParticipant, async (req, res) => {
   try {
-    const { name, category, description, assignedJudges } = req.body;
+    const { name, category, description, hackathonId, status } = req.body;
+    
+    if (!name || !category || !description || !hackathonId) {
+      return res.status(400).json({ 
+        message: 'Name, category, description, and hackathonId are required' 
+      });
+    }
+
     const project = new Project({
       name,
       category,
       description,
-      assignedJudges: assignedJudges || [],
+      hackathonId,
+      createdBy: req.user._id,
+      status: status || 'draft',
+      assignedJudges: [],
     });
     const savedProject = await project.save();
-    const populatedProject = await Project.findById(savedProject._id).populate('assignedJudges');
+    const populatedProject = await Project.findById(savedProject._id)
+      .populate('assignedJudges', 'firstName lastName email specialty initials')
+      .populate('createdBy', 'firstName lastName email')
+      .populate('hackathonId', 'name');
     res.status(201).json(populatedProject);
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
 });
 
-// Update a project
-router.put('/:id', async (req, res) => {
+// Update a project (participant can update own project, admin can update any)
+router.put('/:id', requireAnyAuth, async (req, res) => {
   try {
-    const { name, category, description, assignedJudges } = req.body;
-    const project = await Project.findByIdAndUpdate(
-      req.params.id,
-      { name, category, description, assignedJudges },
-      { new: true, runValidators: true }
-    ).populate('assignedJudges');
-
-    if (!project) {
+    const { name, category, description, assignedJudges, status } = req.body;
+    
+    // Get the current project to compare old vs new assignedJudges
+    const oldProject = await Project.findById(req.params.id);
+    if (!oldProject) {
       return res.status(404).json({ message: 'Project not found' });
     }
 
-    // Update judge assignments
+    // Check permissions: participant can only update their own projects
+    if (req.user.role === 'participant' && oldProject.createdBy.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'You can only update your own projects' });
+    }
+
+    // Only admin and judges can assign judges
+    if (assignedJudges && req.user.role === 'participant') {
+      return res.status(403).json({ message: 'Only admins and judges can assign judges to projects' });
+    }
+
+    const oldAssignedJudges = oldProject.assignedJudges.map(id => id.toString());
+    const newAssignedJudges = assignedJudges ? assignedJudges.map(id => id.toString()) : oldAssignedJudges;
+
+    // Update the project
+    const updateData = { name, category, description };
+    if (assignedJudges !== undefined) {
+      updateData.assignedJudges = assignedJudges;
+    }
+    if (status !== undefined && (req.user.role === 'admin' || req.user.role === 'participant')) {
+      updateData.status = status;
+    }
+
+    const project = await Project.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true, runValidators: true }
+    ).populate('assignedJudges', 'name email specialty initials')
+     .populate('createdBy', 'name email')
+     .populate('hackathonId', 'name');
+
+    // Update judge assignments and clean up stale references
     if (assignedJudges) {
-      await Judge.updateMany(
-        { _id: { $in: assignedJudges } },
-        { assignedToProjectId: req.params.id }
-      );
-      await Judge.updateMany(
-        { _id: { $nin: assignedJudges }, assignedToProjectId: req.params.id },
-        { assignedToProjectId: null }
-      );
+      // Find judges that were removed from this project
+      const removedJudges = oldAssignedJudges.filter(id => !newAssignedJudges.includes(id));
+      
+      // Find judges that were added to this project (moved from other projects)
+      const addedJudges = newAssignedJudges.filter(id => !oldAssignedJudges.includes(id));
+
+      // Remove judges from their old projects' assignedJudges arrays
+      if (addedJudges.length > 0) {
+        const judgesToMove = await User.find({ _id: { $in: addedJudges }, role: 'judge' });
+        for (const judge of judgesToMove) {
+          // Find projects where this judge is assigned and remove them
+          await Project.updateMany(
+            { assignedJudges: judge._id, _id: { $ne: req.params.id } },
+            { $pull: { assignedJudges: judge._id } }
+          );
+        }
+      }
     }
 
     res.json(project);
@@ -77,25 +137,24 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// Assign a judge to a project
-router.post('/:id/judges/:judgeId', async (req, res) => {
+// Assign a judge to a project (admin or judge only)
+router.post('/:id/judges/:judgeId', requireJudge, async (req, res) => {
   try {
     const project = await Project.findById(req.params.id);
-    const judge = await Judge.findById(req.params.judgeId);
+    const judge = await User.findById(req.params.judgeId);
 
     if (!project) {
       return res.status(404).json({ message: 'Project not found' });
     }
-    if (!judge) {
+    if (!judge || judge.role !== 'judge') {
       return res.status(404).json({ message: 'Judge not found' });
     }
 
-    // Remove judge from previous project if assigned
-    if (judge.assignedToProjectId) {
-      await Project.findByIdAndUpdate(judge.assignedToProjectId, {
-        $pull: { assignedJudges: judge._id },
-      });
-    }
+    // Remove judge from previous projects if assigned
+    await Project.updateMany(
+      { assignedJudges: judge._id, _id: { $ne: req.params.id } },
+      { $pull: { assignedJudges: judge._id } }
+    );
 
     // Add judge to new project
     if (!project.assignedJudges.includes(judge._id)) {
@@ -103,27 +162,26 @@ router.post('/:id/judges/:judgeId', async (req, res) => {
       await project.save();
     }
 
-    // Update judge's assigned project
-    judge.assignedToProjectId = project._id;
-    await judge.save();
-
-    const updatedProject = await Project.findById(req.params.id).populate('assignedJudges');
+    const updatedProject = await Project.findById(req.params.id)
+      .populate('assignedJudges', 'firstName lastName email specialty initials')
+      .populate('createdBy', 'firstName lastName email')
+      .populate('hackathonId', 'name');
     res.json(updatedProject);
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
 });
 
-// Remove a judge from a project
-router.delete('/:id/judges/:judgeId', async (req, res) => {
+// Remove a judge from a project (admin or judge only)
+router.delete('/:id/judges/:judgeId', requireJudge, async (req, res) => {
   try {
     const project = await Project.findById(req.params.id);
-    const judge = await Judge.findById(req.params.judgeId);
+    const judge = await User.findById(req.params.judgeId);
 
     if (!project) {
       return res.status(404).json({ message: 'Project not found' });
     }
-    if (!judge) {
+    if (!judge || judge.role !== 'judge') {
       return res.status(404).json({ message: 'Judge not found' });
     }
 
@@ -132,28 +190,33 @@ router.delete('/:id/judges/:judgeId', async (req, res) => {
     );
     await project.save();
 
-    judge.assignedToProjectId = null;
-    await judge.save();
-
-    const updatedProject = await Project.findById(req.params.id).populate('assignedJudges');
+    const updatedProject = await Project.findById(req.params.id)
+      .populate('assignedJudges', 'firstName lastName email specialty initials')
+      .populate('createdBy', 'firstName lastName email')
+      .populate('hackathonId', 'name');
     res.json(updatedProject);
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
 });
 
-// Delete a project
-router.delete('/:id', async (req, res) => {
+// Delete a project (participant can delete own project, admin can delete any)
+router.delete('/:id', requireAnyAuth, async (req, res) => {
   try {
     const project = await Project.findById(req.params.id);
     if (!project) {
       return res.status(404).json({ message: 'Project not found' });
     }
 
-    // Unassign all judges from this project
-    await Judge.updateMany(
-      { assignedToProjectId: req.params.id },
-      { assignedToProjectId: null }
+    // Check permissions: participant can only delete their own projects
+    if (req.user.role === 'participant' && project.createdBy.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'You can only delete your own projects' });
+    }
+
+    // Unassign all judges from this project (cleanup)
+    await Project.updateMany(
+      { assignedJudges: { $in: project.assignedJudges } },
+      { $pull: { assignedJudges: { $in: project.assignedJudges } } }
     );
 
     await Project.findByIdAndDelete(req.params.id);

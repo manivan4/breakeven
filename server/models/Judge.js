@@ -1,21 +1,15 @@
 import mongoose from 'mongoose';
 
+// Note: Judges are now Users with role='judge'
+// This model is kept for backward compatibility but will be deprecated
+// Use User model with role='judge' instead
+
 const judgeSchema = new mongoose.Schema({
-  name: {
-    type: String,
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
     required: true,
-    trim: true,
-  },
-  initials: {
-    type: String,
-    required: true,
-    uppercase: true,
-    maxlength: 5,
-  },
-  specialty: {
-    type: String,
-    required: true,
-    trim: true,
+    unique: true,
   },
   assignedToProjectId: {
     type: mongoose.Schema.Types.ObjectId,

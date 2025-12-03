@@ -16,10 +16,25 @@ const projectSchema = new mongoose.Schema({
     required: true,
     trim: true,
   },
+  hackathonId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Hackathon',
+    required: true,
+  },
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+  },
   assignedJudges: [{
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Judge',
+    ref: 'User', // Judges are now Users
   }],
+  status: {
+    type: String,
+    enum: ['draft', 'submitted', 'under_review', 'judged'],
+    default: 'draft',
+  },
 }, {
   timestamps: true,
 });

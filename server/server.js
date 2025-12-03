@@ -2,8 +2,11 @@ import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import authRoutes from './routes/auth.js';
 import projectRoutes from './routes/projects.js';
 import judgeRoutes from './routes/judges.js';
+import hackathonRoutes from './routes/hackathons.js';
+import adminRoutes from './routes/admin.js';
 
 dotenv.config();
 
@@ -16,6 +19,9 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/hackathons', hackathonRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/judges', judgeRoutes);
 
