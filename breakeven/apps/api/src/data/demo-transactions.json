@@ -1,0 +1,56 @@
+[
+  {
+    "transactionId": "t1",
+    "householdId": "demo-household",
+    "accountLinkId": "demo-account",
+    "amount": 1200,
+    "merchant": "Landlord",
+    "category": "Housing",
+    "timestamp": "2024-12-01T00:00:00.000Z"
+  },
+  {
+    "transactionId": "t2",
+    "householdId": "demo-household",
+    "accountLinkId": "demo-account",
+    "amount": 420,
+    "merchant": "Trader Joe's",
+    "category": "Food",
+    "timestamp": "2024-12-03T00:00:00.000Z"
+  },
+  {
+    "transactionId": "t3",
+    "householdId": "demo-household",
+    "accountLinkId": "demo-account",
+    "amount": 160,
+    "merchant": "Lyft",
+    "category": "Transport",
+    "timestamp": "2024-12-05T00:00:00.000Z"
+  },
+  {
+    "transactionId": "t4",
+    "householdId": "demo-household",
+    "accountLinkId": "demo-account",
+    "amount": 95,
+    "merchant": "Netflix/Spotify bundle",
+    "category": "Subscriptions",
+    "timestamp": "2024-12-07T00:00:00.000Z"
+  },
+  {
+    "transactionId": "t5",
+    "householdId": "demo-household",
+    "accountLinkId": "demo-account",
+    "amount": 260,
+    "merchant": "Restaurants",
+    "category": "Entertainment",
+    "timestamp": "2024-12-08T00:00:00.000Z"
+  },
+  {
+    "transactionId": "t6",
+    "householdId": "demo-household",
+    "accountLinkId": "demo-account",
+    "amount": -3800,
+    "merchant": "Employer Paycheck",
+    "category": "Income",
+    "timestamp": "2024-12-15T00:00:00.000Z"
+  }
+]

@@ -1,0 +1,16 @@
+FROM node:18-alpine as builder
+WORKDIR /app
+COPY ../../package*.json ./
+COPY ../../packages ./packages
+COPY ../../apps/web ./apps/web
+RUN npm ci --workspace @breakeven/web --workspace @breakeven/shared
+RUN npm run build --workspace @breakeven/web
+
+FROM node:18-alpine
+WORKDIR /app
+COPY --from=builder /app/apps/web/.next ./.next
+COPY --from=builder /app/apps/web/public ./public
+COPY --from=builder /app/apps/web/package.json ./package.json
+RUN npm ci --omit=dev
+EXPOSE 3000
+CMD ["npx", "next", "start"]
